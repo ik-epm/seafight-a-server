@@ -35,7 +35,6 @@ const onConnect = (socket) => {
       messageToClients = 'создаем игру'
       console.log('следует создать новую игру')
       createNewGame(playerID)
-      console.log(gameRooms);
     }
 
     for(let client of clients) {
