@@ -2,7 +2,6 @@ const http = require('http');
 const ws = require('ws');
 const port = 3000;
 const wss = new ws.Server({noServer: true});
-const clients = new Set();                       // набор сокетов
 
 const requestHandler = (request, response) => {
   // все входящие запросы должны использовать websockets
@@ -15,31 +14,22 @@ const requestHandler = (request, response) => {
 }
 
 const onConnect = (socket) => {
-  clients.add(socket);                           // добавляем присоединившийся сокет в коллекцию сокетов
 
-  socket.on('message', function (playerID) {
-    let messageToClients = '';
+  socket.on('message', function (gameSettings) {
 
-    const game = checkGame(playerID);
+    gameSettings = JSON.parse(gameSettings);
+    let {state, userID} = gameSettings;
 
-    if (game) { // с нулом не обязательно сравнивать, потому что gheckGame нам и так вернет либо андефайнд, либо какую-то игру
-      console.log('игра найдена:');
-      // return checkGame(playerID);  <- в этом методе не нужен ретёрн, нам надо отправлять данные клиенту
-      // поэтому пока записываем в переменную messageToClients простенькое сообщение
-      messageToClients = 'игра найдена';
-    } else if (gameRooms.length && gameRooms[gameRooms.length - 1].players.length < 2) {
-      messageToClients = 'добавляем игрока в игру'
-      console.log('следует добавить игрока')
-      gameRooms[gameRooms.length - 1].players.push (new Player(playerID))
-    } else {
-      messageToClients = 'создаем игру'
-      console.log('следует создать новую игру')
-      createNewGame(playerID)
-    }
-
-    for(let client of clients) {
-      // отправляем всем текущим сокетам все открытые игры (пока)
-      client.send(messageToClients + JSON.stringify(gameRooms));
+    switch (state) {
+      case 'FIND_GAME':
+        findGame(userID, socket);
+        break;
+      case 'START_GAME':
+        break;
+      case 'FIRE':
+        break;
+      default:
+        break;
     }
   });
 }
@@ -55,14 +45,106 @@ server.listen(port, (err) => {
 
 
 
-function createNewGame(playerID) {
-  const newGame = new Game(gameRooms.length)
-  newGame.players.push (new Player(playerID))
-  gameRooms.push(newGame);
+// -----------------------
+
+
+function startGame(userID, socket, gameSettings) {
+  const {ships, field, gameOn} = gameSettings;
+
+  let game = checkGame(userID);
+
+  shooter = Math.round(Math.random()) ? true : false;
+  
 }
 
 
-//конструктор для объекта "игра"
+function findGame(userID, socket) {
+  let messageToClients = '';
+
+  let game = checkGame(userID);
+
+  if (game) {
+    console.log('игра найдена:');
+    messageToClients = 'игра найдена';
+  } else if (gameRooms.length && gameRooms[gameRooms.length - 1].players.length < 2) {
+    game = gameRooms[gameRooms.length - 1]
+    messageToClients = 'добавляем игрока в игру'
+    console.log('добавляем игрока')
+    game.players.push(new Player(userID, socket))
+  } else {
+    messageToClients = 'создаем игру'
+    console.log('создаем новую игру')
+    game = createNewGame(userID, socket)
+  }
+
+  if (game.players.length === 2) {
+
+    const {player1, player2} = getPlayers(game);
+
+    game.players[0].socket.send(JSON.stringify({message: 'first player', ...player1}))
+    game.players[1].socket.send(JSON.stringify({message: 'second player', ...player2}))
+  }
+
+  // game.players.forEach((player, i) => {
+  //   player.socket.send(JSON.stringify({messageToClients}))
+  // })
+
+  // for(let client of clients) {
+  //   console.log(client);
+  //   // отправляем всем текущим сокетам все открытые игры (пока)
+  //   client.send(messageToClients + JSON.stringify(gameRooms));
+  // }
+}
+
+
+function getPlayers (game) {
+  const {gameOn, gameOver, winner} = game;
+  const player1 = {
+    gameOn,
+    gameOver,
+    winner,
+    player: {
+      // id: game.players[0].id,
+      // username: game.players[0].username,
+      field: game.players[0].field,
+      playerIsShooter: game.players[0].playerIsShooter,
+      // isReady: game.players[0].isReady
+    },
+    enemy: {
+      username: game.players[1].username,
+      field: game.players[1].field,
+    }
+  }
+  const player2 = {
+    gameOn,
+    gameOver,
+    winner,
+    player: {
+      // id: game.players[1].id,
+      // username: game.players[1].username,
+      field: game.players[1].field,
+      playerIsShooter: game.players[1].playerIsShooter,
+      // isReady: game.players[1].isReady
+    },
+    enemy: {
+      username: game.players[0].username,
+      field: game.players[0].field,
+    }
+  }
+
+  return {player1, player2}
+}
+
+
+function createNewGame(playerID, socket) {
+  const newGame = new Game(gameRooms.length + Date.now());
+  newGame.players.push(new Player(playerID, socket));
+  gameRooms.push(newGame);
+  return gameRooms[gameRooms.length - 1];
+}
+
+
+// конструктор для объекта "игра"
 function Game(id) {
   this.gameID = id;
   this.players = [];
@@ -71,27 +153,32 @@ function Game(id) {
   this.gameOver = false;
 }
 
-function Player(id) {
+function Player(id, socket) {
   this.field = [];
   this.ships = [];
   this.username = '';
   this.id = id;
   this.playerIsShooter = false;
+  this.socket = socket;
+  this.isReady = false;
 };
 
-//массив игровых комнат
+// массив игровых комнат
 let gameRooms = [];
 
-//функция проверки массива на игру с указанным playerID
+// функция проверки массива на игру с указанным playerID
 function checkGame(playerID) {
-  // let thisGame = null;
-  gameRooms.forEach(game => {
-    game.players.forEach(player => {
-      if (player.id === playerID) {
-        // thisGame = element;
-        return game
-      }
-    })
-  });
-  // return thisGame;
+  // gameRooms.forEach(game => {
+  //   game.players.forEach(player => {
+  //     if (player.id === playerID) {
+  //       return game
+  //     }
+  //   })
+  // });
+
+
+  return gameRooms.find(game => {
+    return game.players.find(player => player.id === playerID)
+  })
+
 }
