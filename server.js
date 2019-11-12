@@ -18,15 +18,17 @@ const onConnect = (socket) => {
   socket.on('message', function (gameSettings) {
 
     gameSettings = JSON.parse(gameSettings);
-    let {state, userID} = gameSettings;
+    let { state, userID } = gameSettings;
 
     switch (state) {
       case 'FIND_GAME':
-        findGame(userID, socket);
+        findGame(userID, socket, state);
         break;
       case 'START_GAME':
+        startGame(userID, gameSettings, state);
         break;
       case 'FIRE':
+        fire(userID, gameSettings, state);
         break;
       default:
         break;
@@ -48,17 +50,109 @@ server.listen(port, (err) => {
 // -----------------------
 
 
-function startGame(userID, socket, gameSettings) {
-  const {ships, field, gameOn} = gameSettings;
-
+function fire(userID, gameSettings, state) {
   let game = checkGame(userID);
+  let player = game.players.find(player => player.id === userID);
+  let enemy = game.players.find(player => player.id !== userID);
+  const { firedCell } = gameSettings;
+  firedCell = enemy.field[firedCell.coordX][firedCell.coordY]
+  const { cellStatus, isShip, idShip } = firedCell;
 
-  shooter = Math.round(Math.random()) ? true : false;
-  
+  if (!cellStatus) {
+    if (isShip) {
+      firedCell.cellStatus = 'hit';
+      const ship = enemy.ships.find((ship) => ship.id === idShip);
+      ship.hits++;
+
+      if (ship.hits === ship.size) {
+        ship.isSunk = true;
+        message = `${player.username} sank a ${enemy.username}'s ship on x: ${firedCell.coordY + 1} y: ${firedCell.coordX + 1}`;
+        ship.coords.forEach((coords) => setMissCellStatusAround(coords, enemy));
+      } else {
+        message = `${player.username} shot ${enemy.username} on x: ${firedCell.coordY + 1} y: ${firedCell.coordX + 1}`;
+      }
+    } else {
+      firedCell.cellStatus = 'miss';
+      message = `${player.username} missed ${enemy.username} on x: ${firedCell.coordY + 1} y: ${firedCell.coordX + 1}`;
+      player.playerIsShooter = !player.playerIsShooter;
+      enemy.playerIsShooter = !enemy.playerIsShooter;
+    }
+    game.messages.unshift(message);
+  }
+
+  if (enemy.ships.every((ship) => ship.isSunk)) {
+    game.winner = player.username;
+    game.messages.unshift('** Game over **', '-', '-', game.winner + ' is winner', '-');
+    game.gameOver = true;
+  }
+
+  const {player1, player2} = getPlayers(game);
+
+  game.players[0].socket.send(JSON.stringify({message: 'first player', state, ...player1}))
+  game.players[1].socket.send(JSON.stringify({message: 'second player', state, ...player2}))
+
+}
+
+function setMissCellStatusAround(coords, target) {
+  const { coordX, coordY } = coords;
+  const changeCellStatus = (target, coordX, coordY) => {
+    const cell = target.field[coordX][coordY];
+    const isCell = target.field[coordX]
+      && target.field[coordX][coordY];
+
+    if (isCell && !cell.isShip) {
+      cell.cellStatus = 'miss';
+    }
+  };
+
+  const cellsCount = 3;             // 3 - количество ячеек вокруг исходной ячейки
+  for (let i = 0; i < cellsCount; i++) {
+    const y = coordY - 1 + i;
+    for (let j = 0; j < cellsCount; j++) {
+      const x = coordX - 1 + j;
+      changeCellStatus(target, x, y);
+    }
+  }
 }
 
 
-function findGame(userID, socket) {
+
+function startGame(userID, gameSettings, state) {
+  const { ships, field } = gameSettings;
+
+  let game = checkGame(userID);
+  let currentPlayer = game.players.find(player => player.id === userID);
+  currentPlayer.isReady = true;
+
+  currentPlayer.ships = ships;
+  currentPlayer.field = field;
+
+  shooterIndex = Math.round(Math.random() * (game.players.length - 1));
+  game.players[shooterIndex].playerIsShooter = true;
+
+  // shooter = Math.round(Math.random()) ? true : false;
+  // game.players[0].playerIsShooter = shooter;
+  // game.players[1].playerIsShooter = !shooter;
+
+  if (game.players.every(player => player.isReady)) {
+    game.gameOn = true;
+
+    const player1 = {
+      playerIsShooter: game.players[0].playerIsShooter,
+      isEnemyReady: true
+    };
+    const player2 = {
+      playerIsShooter: game.players[1].playerIsShooter,
+      isEnemyReady: true
+    };
+
+    game.players[0].socket.send(JSON.stringify({message: 'first player', state, ...player1}))
+    game.players[1].socket.send(JSON.stringify({message: 'second player', state, ...player2}))
+  }
+}
+
+
+function findGame(userID, socket, state) {
   let messageToClients = '';
 
   let game = checkGame(userID);
@@ -77,17 +171,18 @@ function findGame(userID, socket) {
     game = createNewGame(userID, socket)
   }
 
-  if (game.players.length === 2) {
+//
+  game.players.forEach((player, i) => {
+    player.socket.send(JSON.stringify({messageToClients}))
+  })
+//
 
+  if (game.players.length === 2) {
     const {player1, player2} = getPlayers(game);
 
-    game.players[0].socket.send(JSON.stringify({message: 'first player', ...player1}))
-    game.players[1].socket.send(JSON.stringify({message: 'second player', ...player2}))
+    game.players[0].socket.send(JSON.stringify({message: 'first player', state, ...player1}))
+    game.players[1].socket.send(JSON.stringify({message: 'second player', state, ...player2}))
   }
-
-  // game.players.forEach((player, i) => {
-  //   player.socket.send(JSON.stringify({messageToClients}))
-  // })
 
   // for(let client of clients) {
   //   console.log(client);
@@ -98,16 +193,18 @@ function findGame(userID, socket) {
 
 
 function getPlayers (game) {
-  const {gameOn, gameOver, winner} = game;
+  const { gameOn, gameOver, winner, messages } = game;
   const player1 = {
     gameOn,
     gameOver,
     winner,
+    messages,
+    playerIsShooter: game.players[0].playerIsShooter,
     player: {
       // id: game.players[0].id,
       // username: game.players[0].username,
+      ships: game.players[0].ships,
       field: game.players[0].field,
-      playerIsShooter: game.players[0].playerIsShooter,
       // isReady: game.players[0].isReady
     },
     enemy: {
@@ -119,11 +216,12 @@ function getPlayers (game) {
     gameOn,
     gameOver,
     winner,
+    playerIsShooter: game.players[1].playerIsShooter,
     player: {
       // id: game.players[1].id,
       // username: game.players[1].username,
+      ships: game.players[0].ships,
       field: game.players[1].field,
-      playerIsShooter: game.players[1].playerIsShooter,
       // isReady: game.players[1].isReady
     },
     enemy: {
@@ -151,10 +249,11 @@ function Game(id) {
   this.gameOn = false;
   this.winner = '';
   this.gameOver = false;
+  this.messages = [];
 }
 
 function Player(id, socket) {
-  this.field = [];
+  this.field = null;
   this.ships = [];
   this.username = '';
   this.id = id;
@@ -180,5 +279,4 @@ function checkGame(playerID) {
   return gameRooms.find(game => {
     return game.players.find(player => player.id === playerID)
   })
-
 }
