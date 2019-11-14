@@ -116,8 +116,9 @@ function pass(userID, state) {
 
   const {player1, player2} = getPlayers(game);
   console.log(player1, player2);
-  
-  sendState(game, state, player1, player2);
+
+  game.players[0].socket.send(JSON.stringify({state, ...player1}))
+  game.players[1].socket.send(JSON.stringify({state, ...player2}))
 }
 
 function fire(userID, gameSettings, state) {
