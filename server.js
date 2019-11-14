@@ -62,9 +62,8 @@ server.listen(port, (err) => {
 
 // вводим переменную timer в конструкторе игры
 // когда присоединились два игрока - запускаем таймер
-//
 function setTimer(game) {
-  let delay = 12e4;                     // таймер устанавливаем на 2 минуты
+  let delay = 18e4;                     // таймер устанавливаем на 3 минуты
   let callback;
   console.log('запускаем таймер');
 
@@ -108,14 +107,6 @@ function setTimer(game) {
 
   return setTimeout(callback, delay);
 }
-// var timerId = setTimeout(() => alert("ничего не "), 1000);
-// alert(timerId); // идентификатор таймера
-
-// clearTimeout(timerId);
-// var timerId = setTimeout(() => alert("не происходит"), 900);
-// alert(timerId); // тот же идентификатор (не принимает значение null после отмены)
-
-
 
 
 function fire(userID, gameSettings, state) {
