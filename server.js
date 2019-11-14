@@ -18,11 +18,11 @@ const onConnect = (socket) => {
   socket.on('message', function (gameSettings) {
 
     gameSettings = JSON.parse(gameSettings);
-    let { state, userID } = gameSettings;
+    let { state, username, userID } = gameSettings;
 
     switch (state) {
       case 'FIND_GAME':
-        findGame(userID, socket, state);
+        findGame(userID, username, socket, state);
         break;
       case 'START_GAME':
         startGame(userID, gameSettings, state);
@@ -30,7 +30,17 @@ const onConnect = (socket) => {
       case 'FIRE':
         fire(userID, gameSettings, state);
         break;
+      case 'PASS':
+        // событие, когда один из игроков сдался
+        let game = checkGame(userID);
+        let player = game.players.find(player => player.id === userID);
+        socket.send(JSON.stringify({message: `${player.username} сдался`, state}))
+        break;
+      case 'TIMEOUT':
+        // событие, когда вышло время
+        break;
       default:
+        socket.send(JSON.stringify({message: 'Данное событие на сервере не найдено', state}))
         break;
     }
   });
@@ -48,6 +58,64 @@ server.listen(port, (err) => {
 
 
 // -----------------------
+
+
+// вводим переменную timer в конструкторе игры
+// когда присоединились два игрока - запускаем таймер
+//
+function setTimer(game) {
+  let delay = 12e4;                     // таймер устанавливаем на 2 минуты
+  let callback;
+  console.log('запускаем таймер');
+
+  if (game.gameOn) {
+    callback = () => {
+      game.winner = game.players.find(player => !player.playerIsShooter);
+      game.gameOver = true
+      game.messages.unshift('** Game over **', '-', '-', game.winner + ' is winner', '-');
+
+      const {player1, player2} = getPlayers(game);
+      console.log('время вышло');
+
+      game.players[0].socket.send(JSON.stringify({message: 'first player', state: 'TIMEOUT', ...player1}))
+      game.players[1].socket.send(JSON.stringify({message: 'second player', state: 'TIMEOUT', ...player2}))
+
+      // тут удаляем игру
+      let gameIndex = gameRooms.findIndex(currentGame => game.gameID === currentGame.gameID);
+      gameRooms.splice(gameIndex, 1);
+    }
+  } else {
+    callback = () => {
+      game.winner = game.players.find(player => player.isReady);
+      game.gameOver = true
+      if (game.winner) {
+        game.messages.unshift('** Game over **', '-', '-', game.winner + ' is winner', 'Time\'s up', '-');
+      } else {
+        game.messages.unshift('** Game over **', '-', '-', 'There is no winner', '-');
+      }
+
+      const {player1, player2} = getPlayers(game);
+      console.log('время вышло');
+
+      game.players[0].socket.send(JSON.stringify({message: 'first player', state: 'TIMEOUT', ...player1}))
+      game.players[1].socket.send(JSON.stringify({message: 'second player', state: 'TIMEOUT', ...player2}))
+
+      // тут удаляем игру
+      let gameIndex = gameRooms.findIndex(currentGame => game.gameID === currentGame.gameID);
+      gameRooms.splice(gameIndex, 1);
+    }
+  }
+
+  return setTimeout(callback, delay);
+}
+// var timerId = setTimeout(() => alert("ничего не "), 1000);
+// alert(timerId); // идентификатор таймера
+
+// clearTimeout(timerId);
+// var timerId = setTimeout(() => alert("не происходит"), 900);
+// alert(timerId); // тот же идентификатор (не принимает значение null после отмены)
+
+
 
 
 function fire(userID, gameSettings, state) {
@@ -152,7 +220,7 @@ function startGame(userID, gameSettings, state) {
 }
 
 
-function findGame(userID, socket, state) {
+function findGame(userID, username, socket, state) {
   let messageToClients = '';
 
   let game = checkGame(userID);
@@ -164,11 +232,11 @@ function findGame(userID, socket, state) {
     game = gameRooms[gameRooms.length - 1]
     messageToClients = 'добавляем игрока в игру'
     console.log('добавляем игрока')
-    game.players.push(new Player(userID, socket))
+    game.players.push(new Player(userID, username, socket))
   } else {
     messageToClients = 'создаем игру'
     console.log('создаем новую игру')
-    game = createNewGame(userID, socket)
+    game = createNewGame(userID, username, socket)
   }
 
 //
@@ -179,6 +247,8 @@ function findGame(userID, socket, state) {
 
   if (game.players.length === 2) {
     const {player1, player2} = getPlayers(game);
+    clearTimeout(game.timer);
+    game.timer = setTimer(game);
 
     game.players[0].socket.send(JSON.stringify({message: 'first player', state, ...player1}))
     game.players[1].socket.send(JSON.stringify({message: 'second player', state, ...player2}))
@@ -216,6 +286,7 @@ function getPlayers (game) {
     gameOn,
     gameOver,
     winner,
+    messages,
     playerIsShooter: game.players[1].playerIsShooter,
     player: {
       // id: game.players[1].id,
@@ -234,9 +305,9 @@ function getPlayers (game) {
 }
 
 
-function createNewGame(playerID, socket) {
+function createNewGame(playerID, username, socket) {
   const newGame = new Game(gameRooms.length + Date.now());
-  newGame.players.push(new Player(playerID, socket));
+  newGame.players.push(new Player(playerID, username, socket));
   gameRooms.push(newGame);
   return gameRooms[gameRooms.length - 1];
 }
@@ -250,12 +321,13 @@ function Game(id) {
   this.winner = '';
   this.gameOver = false;
   this.messages = [];
+  this.timer = null;
 }
 
-function Player(id, socket) {
+function Player(id, username, socket) {
   this.field = null;
   this.ships = [];
-  this.username = '';
+  this.username = username;
   this.id = id;
   this.playerIsShooter = false;
   this.socket = socket;
