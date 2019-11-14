@@ -237,7 +237,9 @@ function findGame(userID, username, socket, state) {
 
 function sendState(game, state, player1, player2) {
   clearTimeout(game.timer);
-  game.timer = setTimer(game);
+  if (!game.gameOver) {
+    game.timer = setTimer(game);
+  }
 
   game.players[0].socket.send(JSON.stringify({state, ...player1}))
   game.players[1].socket.send(JSON.stringify({state, ...player2}))
