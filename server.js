@@ -32,13 +32,11 @@ const onConnect = (socket) => {
         break;
       case 'PASS':
         // событие, когда один из игроков сдался
-        let game = checkGame(userID);
-        let player = game.players.find(player => player.id === userID);
-        socket.send(JSON.stringify({message: `${player.username} сдался`, state}))
+        pass(userID, state);
         break;
-      case 'TIMEOUT':
+      // case 'TIMEOUT':
         // событие, когда вышло время
-        break;
+        // break;
       default:
         socket.send(JSON.stringify({message: 'Данное событие на сервере не найдено', state}))
         break;
@@ -61,7 +59,7 @@ server.listen(port, (err) => {
 
 
 // вводим переменную timer в конструкторе игры
-// когда присоединились два игрока - запускаем таймер
+// каждый раз, когда отправляем стейт игры игрокам, обновляем таймер (функция sendState)
 function setTimer(game) {
   let delay = 18e4;                     // таймер устанавливаем на 3 минуты
   let callback;
@@ -76,8 +74,8 @@ function setTimer(game) {
       const {player1, player2} = getPlayers(game);
       console.log('время вышло');
 
-      game.players[0].socket.send(JSON.stringify({message: 'first player', state: 'TIMEOUT', ...player1}))
-      game.players[1].socket.send(JSON.stringify({message: 'second player', state: 'TIMEOUT', ...player2}))
+      game.players[0].socket.send(JSON.stringify({state: 'TIMEOUT', ...player1}))
+      game.players[1].socket.send(JSON.stringify({state: 'TIMEOUT', ...player2}))
 
       // тут удаляем игру
       let gameIndex = gameRooms.findIndex(currentGame => game.gameID === currentGame.gameID);
@@ -96,8 +94,8 @@ function setTimer(game) {
       const {player1, player2} = getPlayers(game);
       console.log('время вышло');
 
-      game.players[0].socket.send(JSON.stringify({message: 'first player', state: 'TIMEOUT', ...player1}))
-      game.players[1].socket.send(JSON.stringify({message: 'second player', state: 'TIMEOUT', ...player2}))
+      game.players[0].socket.send(JSON.stringify({state: 'TIMEOUT', ...player1}))
+      game.players[1].socket.send(JSON.stringify({state: 'TIMEOUT', ...player2}))
 
       // тут удаляем игру
       let gameIndex = gameRooms.findIndex(currentGame => game.gameID === currentGame.gameID);
@@ -108,6 +106,19 @@ function setTimer(game) {
   return setTimeout(callback, delay);
 }
 
+
+function pass(userID, state) {
+  let game = checkGame(userID);
+  player = game.players.find(player => player.id === userID);
+  game.winner = game.players.find(player => player.id !== userID).username;
+  game.gameOver = true
+  game.messages.unshift('** Game over **', '-', '-', game.winner + ' is winner', player.username + ' gave up', '-');
+
+  const {player1, player2} = getPlayers(game);
+  console.log(player1, player2);
+  
+  sendState(game, state, player1, player2);
+}
 
 function fire(userID, gameSettings, state) {
   let game = checkGame(userID);
@@ -146,11 +157,9 @@ function fire(userID, gameSettings, state) {
   }
 
   const {player1, player2} = getPlayers(game);
-
-  game.players[0].socket.send(JSON.stringify({message: 'first player', state, ...player1}))
-  game.players[1].socket.send(JSON.stringify({message: 'second player', state, ...player2}))
-
+  sendState(game, state, player1, player2);
 }
+
 
 function setMissCellStatusAround(coords, target) {
   const { coordX, coordY } = coords;
@@ -175,7 +184,6 @@ function setMissCellStatusAround(coords, target) {
 }
 
 
-
 function startGame(userID, gameSettings, state) {
   const { ships, field } = gameSettings;
 
@@ -189,10 +197,6 @@ function startGame(userID, gameSettings, state) {
   shooterIndex = Math.round(Math.random() * (game.players.length - 1));
   game.players[shooterIndex].playerIsShooter = true;
 
-  // shooter = Math.round(Math.random()) ? true : false;
-  // game.players[0].playerIsShooter = shooter;
-  // game.players[1].playerIsShooter = !shooter;
-
   if (game.players.every(player => player.isReady)) {
     game.gameOn = true;
 
@@ -204,52 +208,38 @@ function startGame(userID, gameSettings, state) {
       playerIsShooter: game.players[1].playerIsShooter,
       isEnemyReady: true
     };
-
-    game.players[0].socket.send(JSON.stringify({message: 'first player', state, ...player1}))
-    game.players[1].socket.send(JSON.stringify({message: 'second player', state, ...player2}))
+    sendState(game, state, player1, player2);
   }
 }
 
 
 function findGame(userID, username, socket, state) {
-  let messageToClients = '';
-
   let game = checkGame(userID);
 
   if (game) {
     console.log('игра найдена:');
-    messageToClients = 'игра найдена';
   } else if (gameRooms.length && gameRooms[gameRooms.length - 1].players.length < 2) {
     game = gameRooms[gameRooms.length - 1]
-    messageToClients = 'добавляем игрока в игру'
     console.log('добавляем игрока')
     game.players.push(new Player(userID, username, socket))
   } else {
-    messageToClients = 'создаем игру'
     console.log('создаем новую игру')
     game = createNewGame(userID, username, socket)
   }
 
-//
-  game.players.forEach((player, i) => {
-    player.socket.send(JSON.stringify({messageToClients}))
-  })
-//
-
   if (game.players.length === 2) {
     const {player1, player2} = getPlayers(game);
-    clearTimeout(game.timer);
-    game.timer = setTimer(game);
-
-    game.players[0].socket.send(JSON.stringify({message: 'first player', state, ...player1}))
-    game.players[1].socket.send(JSON.stringify({message: 'second player', state, ...player2}))
+    sendState(game, state, player1, player2);
   }
+}
 
-  // for(let client of clients) {
-  //   console.log(client);
-  //   // отправляем всем текущим сокетам все открытые игры (пока)
-  //   client.send(messageToClients + JSON.stringify(gameRooms));
-  // }
+
+function sendState(game, state, player1, player2) {
+  clearTimeout(game.timer);
+  game.timer = setTimer(game);
+
+  game.players[0].socket.send(JSON.stringify({state, ...player1}))
+  game.players[1].socket.send(JSON.stringify({state, ...player2}))
 }
 
 
@@ -303,7 +293,6 @@ function createNewGame(playerID, username, socket) {
   return gameRooms[gameRooms.length - 1];
 }
 
-
 // конструктор для объекта "игра"
 function Game(id) {
   this.gameID = id;
@@ -330,15 +319,6 @@ let gameRooms = [];
 
 // функция проверки массива на игру с указанным playerID
 function checkGame(playerID) {
-  // gameRooms.forEach(game => {
-  //   game.players.forEach(player => {
-  //     if (player.id === playerID) {
-  //       return game
-  //     }
-  //   })
-  // });
-
-
   return gameRooms.find(game => {
     return game.players.find(player => player.id === playerID)
   })
