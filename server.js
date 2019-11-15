@@ -1,7 +1,24 @@
 const http = require('http');
 const ws = require('ws');
+const fs = require("fs");
 const port = 3000;
 const wss = new ws.Server({noServer: true});
+
+fs.readFile('server-state.json', (error, data) => {
+  console.log('Асинхронное чтение файла');
+  if (error) {
+    console.log('Ошибка');
+    throw error; // если возникла ошибка
+  }
+  console.log('Данные: ', data.byteLength);  // выводим считанные данные
+  if (data.byteLength) {
+    data = JSON.parse(data);
+    gameRooms = data;
+    gameRooms.forEach(game => {
+      game.timer = setTimer(game);
+    })
+  }
+});
 
 const requestHandler = (request, response) => {
   // все входящие запросы должны использовать websockets
@@ -64,6 +81,7 @@ function setTimer(game) {
   let delay = 18e4;                     // таймер устанавливаем на 3 минуты
   let callback;
   console.log('запускаем таймер');
+  const state = 'TIMEOUT'
 
   if (game.gameOn) {
     callback = () => {
@@ -74,12 +92,7 @@ function setTimer(game) {
       const {player1, player2} = getPlayers(game);
       console.log('время вышло');
 
-      game.players[0].socket.send(JSON.stringify({state: 'TIMEOUT', ...player1}))
-      game.players[1].socket.send(JSON.stringify({state: 'TIMEOUT', ...player2}))
-
-      // тут удаляем игру
-      let gameIndex = gameRooms.findIndex(currentGame => game.gameID === currentGame.gameID);
-      gameRooms.splice(gameIndex, 1);
+      sendState(game, state, player1, player2)
     }
   } else {
     callback = () => {
@@ -94,12 +107,7 @@ function setTimer(game) {
       const {player1, player2} = getPlayers(game);
       console.log('время вышло');
 
-      game.players[0].socket.send(JSON.stringify({state: 'TIMEOUT', ...player1}))
-      game.players[1].socket.send(JSON.stringify({state: 'TIMEOUT', ...player2}))
-
-      // тут удаляем игру
-      let gameIndex = gameRooms.findIndex(currentGame => game.gameID === currentGame.gameID);
-      gameRooms.splice(gameIndex, 1);
+      sendState(game, state, player1, player2)
     }
   }
 
@@ -109,16 +117,15 @@ function setTimer(game) {
 
 function pass(userID, state) {
   let game = checkGame(userID);
-  player = game.players.find(player => player.id === userID);
-  game.winner = game.players.find(player => player.id !== userID).username;
-  game.gameOver = true
-  game.messages.unshift('** Game over **', '-', '-', game.winner + ' is winner', player.username + ' gave up', '-');
+  if (game.players.length === 2) {
+    player = game.players.find(player => player.id === userID);
+    game.winner = game.players.find(player => player.id !== userID).username;
+    game.gameOver = true
+    game.messages.unshift('** Game over **', '-', '-', game.winner + ' is winner', player.username + ' give up', '-');
 
-  const {player1, player2} = getPlayers(game);
-  console.log(player1, player2);
-
-  game.players[0].socket.send(JSON.stringify({state, ...player1}))
-  game.players[1].socket.send(JSON.stringify({state, ...player2}))
+    const {player1, player2} = getPlayers(game);
+    sendState(game, state, player1, player2);
+  }
 }
 
 function fire(userID, gameSettings, state) {
@@ -219,6 +226,11 @@ function findGame(userID, username, socket, state) {
 
   if (game) {
     console.log('игра найдена:');
+    let player = game.players.find(player => player.id === userID);   // <- вставь эту строку
+    player.socket = socket;   // <- и эту
+
+    // <- тут надо переделать немного
+
   } else if (gameRooms.length && gameRooms[gameRooms.length - 1].players.length < 2) {
     game = gameRooms[gameRooms.length - 1]
     console.log('добавляем игрока')
@@ -229,20 +241,49 @@ function findGame(userID, username, socket, state) {
   }
 
   if (game.players.length === 2) {
+    game.messages.unshift('-', game.players[1].username + ' join the game', game.players[0].username + ' join the game');
     const {player1, player2} = getPlayers(game);
     sendState(game, state, player1, player2);
   }
 }
 
 
+function deleteGame(game) {
+  let gameIndex = gameRooms.findIndex(currentGame => game.gameID === currentGame.gameID);
+  gameRooms.splice(gameIndex, 1);
+}
+
+
 function sendState(game, state, player1, player2) {
   clearTimeout(game.timer);
-  if (!game.gameOver) {
+
+  if (game.players[0].socket) {
+    game.players[0].socket.send(JSON.stringify({state, ...player1}))
+  }
+  if (game.players[1].socket) {
+    game.players[1].socket.send(JSON.stringify({state, ...player2}))
+  }
+
+  if (game.gameOver) {
+    deleteGame(game);
+  } else {
     game.timer = setTimer(game);
   }
 
-  game.players[0].socket.send(JSON.stringify({state, ...player1}))
-  game.players[1].socket.send(JSON.stringify({state, ...player2}))
+  const jsonReplacer = (key, value) => {
+    if (key == 'timer' || key == 'socket') {
+      return undefined;
+    }
+    return value;
+  }
+  data = JSON.stringify(gameRooms, jsonReplacer)
+  fs.writeFile('server-state.json', data, (error) => {
+    console.log('Асинхронная запись файла');
+    if (error) {
+      console.log('Ошибка');
+      throw error; // если возникла ошибка
+    }
+  });
 }
 
 
