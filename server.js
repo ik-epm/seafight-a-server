@@ -10,8 +10,8 @@ fs.readFile('server-state.json', (error, data) => {
     console.log('Ошибка');
     throw error; // если возникла ошибка
   }
-  console.log('Данные: ', data.byteLength);  // выводим считанные данные
   if (data.byteLength) {
+    // console.log('Данные: ', data.byteLength);
     data = JSON.parse(data);
     gameRooms = data;
     gameRooms.forEach(game => {
@@ -32,8 +32,25 @@ const requestHandler = (request, response) => {
 
 const onConnect = (socket) => {
 
-  socket.on('message', function (gameSettings) {
+  socket.on('close', function() {
+    let player;
+    const state = 'CLOSE';
+    let game = gameRooms.find(game => {
+      player = game.players.find(player => player.socket === socket);
+      return player;
+    })
 
+    if (game && game.players.length === 2) {
+      player.socket = null;
+      game.messages.unshift(player.username + ' disconnected');
+      const {player1, player2} = getPlayers(game);
+      sendState(game, state, player1, player2);
+    } else if (game){
+      deleteGame(game);
+    }
+  });
+
+  socket.on('message', function (gameSettings) {
     gameSettings = JSON.parse(gameSettings);
     let { state, username, userID } = gameSettings;
 
@@ -127,6 +144,7 @@ function pass(userID, state) {
     sendState(game, state, player1, player2);
   }
 }
+
 
 function fire(userID, gameSettings, state) {
   let game = checkGame(userID);
@@ -226,22 +244,25 @@ function findGame(userID, username, socket, state) {
 
   if (game) {
     console.log('игра найдена:');
-    let player = game.players.find(player => player.id === userID);   // <- вставь эту строку
-    player.socket = socket;   // <- и эту
 
     // <- тут надо переделать немного
 
   } else if (gameRooms.length && gameRooms[gameRooms.length - 1].players.length < 2) {
     game = gameRooms[gameRooms.length - 1]
     console.log('добавляем игрока')
-    game.players.push(new Player(userID, username, socket))
+    game.players.push(new Player(userID, username))
   } else {
     console.log('создаем новую игру')
-    game = createNewGame(userID, username, socket)
+    game = createNewGame(userID, username)
   }
 
+  let player = game.players.find(player => player.id === userID);
+  if (!player.socket) {
+    game.messages.unshift(player.username + ' join the game');
+  }
+  player.socket = socket;
+
   if (game.players.length === 2) {
-    game.messages.unshift('-', game.players[1].username + ' join the game', game.players[0].username + ' join the game');
     const {player1, player2} = getPlayers(game);
     sendState(game, state, player1, player2);
   }
@@ -330,9 +351,9 @@ function getPlayers (game) {
 }
 
 
-function createNewGame(playerID, username, socket) {
+function createNewGame(playerID, username) {
   const newGame = new Game(gameRooms.length + Date.now());
-  newGame.players.push(new Player(playerID, username, socket));
+  newGame.players.push(new Player(playerID, username));
   gameRooms.push(newGame);
   return gameRooms[gameRooms.length - 1];
 }
@@ -348,13 +369,13 @@ function Game(id) {
   this.timer = null;
 }
 
-function Player(id, username, socket) {
+function Player(id, username) {
   this.field = null;
   this.ships = [];
   this.username = username;
   this.id = id;
   this.playerIsShooter = false;
-  this.socket = socket;
+  this.socket = null;
   this.isReady = false;
 };
 
