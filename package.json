@@ -1,0 +1,15 @@
+{
+  "name": "battleship-server",
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "node express.js"
+  },
+  "private": true,
+  "license": "MIT",
+  "dependencies": {
+    "async-limiter": "^1.0.1",
+    "express": "^4.17.1",
+    "nodemon": "^1.19.4",
+    "ws": "^7.2.0"
+  }
+}
