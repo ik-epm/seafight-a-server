@@ -110,7 +110,7 @@ function setTimer(game) {
   if (game.gameOn) {
     callback = () => {
       console.log(game.time, game.time === 0);
-      if (game.time-- === 0) {
+      if (--game.time < 0) {
         clearInterval(game.timerID);
         game.winner = game.players.find(player => !player.playerIsShooter).username;
         game.gameOver = true;
@@ -123,7 +123,7 @@ function setTimer(game) {
   } else {
     callback = () => {
       console.log(game.time, game.time === 0);
-      if (game.time-- === 0) {
+      if (--game.time < 0) {
         clearInterval(game.timerID);
         const winner = game.players.find(player => player.isReady);
         game.gameOver = true;
@@ -249,14 +249,7 @@ function startGame(userID, gameSettings, state) {
     game.gameOn = true;
     game.messages.unshift(game.players[shooterIndex].username + ' shoots first');
 
-    const player1 = {
-      playerIsShooter: game.players[0].playerIsShooter,
-      messages: game.messages
-    };
-    const player2 = {
-      playerIsShooter: game.players[1].playerIsShooter,
-      messages: game.messages
-    };
+    const { player1, player2 } = getPlayers(game);
     sendState(game, state, player1, player2);
   }
 }
@@ -318,6 +311,16 @@ function sendState(game, state, player1, player2) {
     return value;
   };
 
+  let problems = game.players.some(player => !player.socket) || (game.gameOn && game.messages[0].includes('join the game'));
+  console.log(game.gameOn, game.messages[0]);
+
+ if (!problems && !game.gameOver) {
+    clearInterval(game.timerID)
+    game.timerID = setTimer(game);
+    player1.time = game.time;
+    player2.time = game.time;
+  }
+
   if (game.players[0].socket) {
     game.players[0].socket.send(JSON.stringify({ state, ...player1 }, jsonReplacer));
   }
@@ -325,16 +328,9 @@ function sendState(game, state, player1, player2) {
     game.players[1].socket.send(JSON.stringify({ state, ...player2 }, jsonReplacer));
   }
 
-  let problems = game.players.some(player => !player.socket) || (game.gameOn && game.messages[0].includes('join the game'));
-  console.log(game.gameOn, game.messages[0]);
-
   if (game.gameOver) {
     deleteGame(game);
-  } else if (!problems) {
-    clearInterval(game.timerID)
-    game.timerID = setTimer(game);
   }
-
   const data = JSON.stringify(gameRooms, jsonReplacer);
   fs.writeFile('server-state.json', data, (error) => {
     console.log('Асинхронная запись файла');
