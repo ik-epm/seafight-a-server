@@ -198,12 +198,10 @@ function fire(userID, gameSettings, state) {
       game.messages.unshift('** Game over **', '-', '-', game.winner + ' is winner', '-');
       game.gameOver = true;
     }
+
+    const { player1, player2 } = getPlayers(game);
+    sendState(game, state, player1, player2);
   }
-
-  const { player1, player2 } = getPlayers(game);
-
-  sendState(game, state, player1, player2);
-
 }
 
 function setMissCellStatusAround(coords, target) {
@@ -311,7 +309,8 @@ function sendState(game, state, player1, player2) {
     return value;
   };
 
-  let problems = game.players.some(player => !player.socket) || (game.gameOn && game.messages[0].includes('join the game'));
+  let problems = game.players.some(player => !player.socket)
+   || (game.players.find(player => player.isReady) && game.messages[0].includes('join the game'));
   console.log(game.gameOn, game.messages[0]);
 
  if (!problems && !game.gameOver) {
